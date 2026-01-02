@@ -1,0 +1,239 @@
+# Default values for Movra
+
+# Global settings
+global:
+  imageRegistry: ""
+  imagePullSecrets: []
+
+# Service configurations
+services:
+  apiGateway:
+    enabled: true
+    replicaCount: 2
+    image:
+      repository: movra/api-gateway
+      tag: latest
+      pullPolicy: IfNotPresent
+    service:
+      type: ClusterIP
+      port: 3000
+    resources:
+      limits:
+        cpu: 500m
+        memory: 512Mi
+      requests:
+        cpu: 100m
+        memory: 128Mi
+    env:
+      NODE_ENV: production
+      PORT: "3000"
+
+  authService:
+    enabled: true
+    replicaCount: 2
+    image:
+      repository: movra/auth-service
+      tag: latest
+      pullPolicy: IfNotPresent
+    service:
+      type: ClusterIP
+      port: 5001
+      grpcPort: 5002
+    resources:
+      limits:
+        cpu: 500m
+        memory: 512Mi
+      requests:
+        cpu: 100m
+        memory: 128Mi
+    env:
+      ASPNETCORE_ENVIRONMENT: Production
+
+  paymentService:
+    enabled: true
+    replicaCount: 2
+    image:
+      repository: movra/payment-service
+      tag: latest
+      pullPolicy: IfNotPresent
+    service:
+      type: ClusterIP
+      port: 8081
+      grpcPort: 9091
+    resources:
+      limits:
+        cpu: 1000m
+        memory: 1024Mi
+      requests:
+        cpu: 200m
+        memory: 256Mi
+    env:
+      SPRING_PROFILES_ACTIVE: prod
+
+  exchangeRateService:
+    enabled: true
+    replicaCount: 2
+    image:
+      repository: movra/exchange-rate-service
+      tag: latest
+      pullPolicy: IfNotPresent
+    service:
+      type: ClusterIP
+      port: 8082
+      grpcPort: 9092
+    resources:
+      limits:
+        cpu: 500m
+        memory: 256Mi
+      requests:
+        cpu: 100m
+        memory: 64Mi
+    env:
+      GIN_MODE: release
+
+  settlementService:
+    enabled: true
+    replicaCount: 2
+    image:
+      repository: movra/settlement-service
+      tag: latest
+      pullPolicy: IfNotPresent
+    service:
+      type: ClusterIP
+      port: 8083
+      grpcPort: 9093
+    resources:
+      limits:
+        cpu: 500m
+        memory: 256Mi
+      requests:
+        cpu: 100m
+        memory: 64Mi
+    env:
+      GIN_MODE: release
+
+  notificationService:
+    enabled: true
+    replicaCount: 2
+    image:
+      repository: movra/notification-service
+      tag: latest
+      pullPolicy: IfNotPresent
+    service:
+      type: ClusterIP
+      port: 3002
+    resources:
+      limits:
+        cpu: 500m
+        memory: 512Mi
+      requests:
+        cpu: 100m
+        memory: 128Mi
+    env:
+      NODE_ENV: production
+
+  frontend:
+    enabled: true
+    replicaCount: 2
+    image:
+      repository: movra/frontend
+      tag: latest
+      pullPolicy: IfNotPresent
+    service:
+      type: ClusterIP
+      port: 80
+    resources:
+      limits:
+        cpu: 200m
+        memory: 128Mi
+      requests:
+        cpu: 50m
+        memory: 64Mi
+
+# Ingress configuration
+ingress:
+  enabled: true
+  className: nginx
+  annotations:
+    cert-manager.io/cluster-issuer: letsencrypt-prod
+  hosts:
+    - host: movra.example.com
+      paths:
+        - path: /
+          pathType: Prefix
+          service: frontend
+        - path: /api
+          pathType: Prefix
+          service: apiGateway
+  tls:
+    - secretName: movra-tls
+      hosts:
+        - movra.example.com
+
+# Database settings (using Bitnami PostgreSQL)
+postgresql:
+  enabled: true
+  auth:
+    postgresPassword: movra_admin
+    username: movra
+    password: movra_prod
+  primary:
+    persistence:
+      size: 10Gi
+
+# Redis settings (using Bitnami Redis)
+redis:
+  enabled: true
+  auth:
+    enabled: true
+    password: movra_redis
+  master:
+    persistence:
+      size: 1Gi
+
+# Kafka settings (using Bitnami Kafka)
+kafka:
+  enabled: true
+  auth:
+    clientProtocol: plaintext
+  persistence:
+    size: 10Gi
+
+# Observability
+observability:
+  prometheus:
+    enabled: true
+  grafana:
+    enabled: true
+  jaeger:
+    enabled: true
+  loki:
+    enabled: true
+
+# mTLS configuration
+mtls:
+  enabled: true
+  certManager:
+    enabled: true
+    issuerName: movra-ca-issuer
+
+# Service accounts
+serviceAccount:
+  create: true
+  annotations: {}
+  name: ""
+
+# Pod security
+podSecurityContext:
+  fsGroup: 1000
+
+securityContext:
+  runAsNonRoot: true
+  runAsUser: 1000
+
+# Autoscaling
+autoscaling:
+  enabled: false
+  minReplicas: 2
+  maxReplicas: 10
+  targetCPUUtilizationPercentage: 80

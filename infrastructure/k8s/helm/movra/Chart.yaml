@@ -1,0 +1,22 @@
+apiVersion: v2
+name: movra
+description: Cross-border payment platform Helm chart
+type: application
+version: 0.1.0
+appVersion: "1.0.0"
+
+dependencies:
+  - name: postgresql
+    version: "13.2.0"
+    repository: "https://charts.bitnami.com/bitnami"
+    condition: postgresql.enabled
+
+  - name: redis
+    version: "18.2.0"
+    repository: "https://charts.bitnami.com/bitnami"
+    condition: redis.enabled
+
+  - name: kafka
+    version: "26.4.0"
+    repository: "https://charts.bitnami.com/bitnami"
+    condition: kafka.enabled
