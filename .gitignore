@@ -1,0 +1,66 @@
+# Dependencies
+node_modules/
+vendor/
+.gradle/
+build/
+target/
+bin/
+obj/
+
+# Environment
+.env
+.env.local
+.env.*.local
+*.local.yaml
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+.DS_Store
+
+# Logs
+logs/
+*.log
+npm-debug.log*
+
+# Build outputs
+dist/
+out/
+*.jar
+*.war
+*.dll
+*.exe
+
+# Test coverage
+coverage/
+.nyc_output/
+*.coverage
+
+# Generated code
+**/generated/
+*_pb2.py
+*_pb2_grpc.py
+*.pb.go
+*_grpc.pb.go
+
+# Certificates (keep templates, ignore actual certs)
+certs/*.pem
+certs/*.key
+certs/*.crt
+!certs/.gitkeep
+
+# Database
+*.db
+*.sqlite
+
+# Docker
+.docker/
+
+# Kubernetes secrets
+*-secret.yaml
+*-secrets.yaml
+
+# OS
+Thumbs.db
