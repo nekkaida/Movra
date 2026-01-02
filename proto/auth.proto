@@ -1,0 +1,131 @@
+syntax = "proto3";
+
+package movra.auth;
+
+option go_package = "github.com/movra/proto/auth";
+option java_package = "com.movra.proto.auth";
+option java_multiple_files = true;
+option csharp_namespace = "Movra.Proto.Auth";
+
+import "common.proto";
+
+// Auth Service - handles authentication, authorization, and KYC
+service AuthService {
+  // Token verification
+  rpc VerifyToken(VerifyTokenRequest) returns (VerifyTokenResponse);
+  rpc RefreshToken(RefreshTokenRequest) returns (RefreshTokenResponse);
+
+  // User management (internal)
+  rpc GetUser(GetUserRequest) returns (GetUserResponse);
+  rpc GetUserKYCLevel(GetUserKYCLevelRequest) returns (GetUserKYCLevelResponse);
+
+  // Registration and login (typically via REST, but available via gRPC for internal use)
+  rpc Register(RegisterRequest) returns (RegisterResponse);
+  rpc Login(LoginRequest) returns (LoginResponse);
+}
+
+// KYC Levels
+enum KYCLevel {
+  KYC_LEVEL_UNSPECIFIED = 0;
+  KYC_LEVEL_NONE = 1;        // Just registered
+  KYC_LEVEL_BASIC = 2;       // Email verified
+  KYC_LEVEL_VERIFIED = 3;    // ID verified
+  KYC_LEVEL_PREMIUM = 4;     // Full verification + proof of address
+}
+
+// User representation
+message User {
+  string id = 1;
+  string email = 2;
+  string phone = 3;
+  string first_name = 4;
+  string last_name = 5;
+  KYCLevel kyc_level = 6;
+  movra.common.Timestamp created_at = 7;
+  movra.common.Timestamp updated_at = 8;
+}
+
+// Token Verification
+message VerifyTokenRequest {
+  string token = 1;
+}
+
+message VerifyTokenResponse {
+  bool valid = 1;
+  string user_id = 2;
+  KYCLevel kyc_level = 3;
+  movra.common.Timestamp expires_at = 4;
+  movra.common.Error error = 5;
+}
+
+// Token Refresh
+message RefreshTokenRequest {
+  string refresh_token = 1;
+}
+
+message RefreshTokenResponse {
+  string access_token = 1;
+  string refresh_token = 2;
+  movra.common.Timestamp expires_at = 3;
+  movra.common.Error error = 4;
+}
+
+// Get User
+message GetUserRequest {
+  string user_id = 1;
+}
+
+message GetUserResponse {
+  User user = 1;
+  movra.common.Error error = 2;
+}
+
+// Get User KYC Level
+message GetUserKYCLevelRequest {
+  string user_id = 1;
+}
+
+message GetUserKYCLevelResponse {
+  string user_id = 1;
+  KYCLevel kyc_level = 2;
+  TransferLimits limits = 3;
+  movra.common.Error error = 4;
+}
+
+// Transfer limits based on KYC level
+message TransferLimits {
+  movra.common.Money daily_limit = 1;
+  movra.common.Money monthly_limit = 2;
+  movra.common.Money per_transaction_limit = 3;
+}
+
+// Registration
+message RegisterRequest {
+  string email = 1;
+  string password = 2;
+  string phone = 3;
+  string first_name = 4;
+  string last_name = 5;
+}
+
+message RegisterResponse {
+  User user = 1;
+  string access_token = 2;
+  string refresh_token = 3;
+  movra.common.Error error = 4;
+}
+
+// Login
+message LoginRequest {
+  string email = 1;
+  string password = 2;
+}
+
+message LoginResponse {
+  User user = 1;
+  string access_token = 2;
+  string refresh_token = 3;
+  bool requires_mfa = 4;
+  string mfa_token = 5;  // Temporary token for MFA flow
+  movra.common.Error error = 6;
+}

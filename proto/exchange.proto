@@ -1,0 +1,111 @@
+syntax = "proto3";
+
+package movra.exchange;
+
+option go_package = "github.com/movra/proto/exchange";
+option java_package = "com.movra.proto.exchange";
+option java_multiple_files = true;
+option csharp_namespace = "Movra.Proto.Exchange";
+
+import "common.proto";
+
+// Exchange Rate Service - handles FX rates and rate locking
+service ExchangeRateService {
+  // Get current rate
+  rpc GetRate(GetRateRequest) returns (GetRateResponse);
+
+  // Lock a rate for a period (used during transfer confirmation)
+  rpc LockRate(LockRateRequest) returns (LockRateResponse);
+
+  // Get a previously locked rate
+  rpc GetLockedRate(GetLockedRateRequest) returns (GetLockedRateResponse);
+
+  // Get available corridors
+  rpc GetCorridors(GetCorridorsRequest) returns (GetCorridorsResponse);
+
+  // Stream rate updates (for real-time display)
+  rpc StreamRates(StreamRatesRequest) returns (stream RateUpdate);
+}
+
+// Exchange rate representation
+message ExchangeRate {
+  string source_currency = 1;
+  string target_currency = 2;
+  string rate = 3;             // Mid-market rate
+  string buy_rate = 4;         // Rate we offer (includes our margin)
+  string margin_percentage = 5;
+  movra.common.Timestamp fetched_at = 6;
+  movra.common.Timestamp expires_at = 7;
+}
+
+// Locked rate representation
+message LockedRate {
+  string lock_id = 1;
+  ExchangeRate rate = 2;
+  movra.common.Timestamp locked_at = 3;
+  movra.common.Timestamp expires_at = 4;
+  bool expired = 5;
+}
+
+// Corridor configuration
+message Corridor {
+  string source_currency = 1;
+  string target_currency = 2;
+  bool enabled = 3;
+  string fee_percentage = 4;
+  movra.common.Money fee_minimum = 5;
+  string margin_percentage = 6;
+  repeated string payout_methods = 7;  // Available payout methods for this corridor
+}
+
+// Get Rate
+message GetRateRequest {
+  string source_currency = 1;
+  string target_currency = 2;
+}
+
+message GetRateResponse {
+  ExchangeRate rate = 1;
+  movra.common.Error error = 2;
+}
+
+// Lock Rate
+message LockRateRequest {
+  string source_currency = 1;
+  string target_currency = 2;
+  int32 lock_duration_seconds = 3;  // How long to lock (default 30s, max 120s)
+}
+
+message LockRateResponse {
+  LockedRate locked_rate = 1;
+  movra.common.Error error = 2;
+}
+
+// Get Locked Rate
+message GetLockedRateRequest {
+  string lock_id = 1;
+}
+
+message GetLockedRateResponse {
+  LockedRate locked_rate = 1;
+  movra.common.Error error = 2;
+}
+
+// Get Corridors
+message GetCorridorsRequest {
+  string source_currency = 1;  // Optional: filter by source
+}
+
+message GetCorridorsResponse {
+  repeated Corridor corridors = 1;
+  movra.common.Error error = 2;
+}
+
+// Stream Rates
+message StreamRatesRequest {
+  repeated string currency_pairs = 1;  // e.g., ["SGD:PHP", "SGD:USD"]
+}
+
+message RateUpdate {
+  ExchangeRate rate = 1;
+}

@@ -1,0 +1,48 @@
+syntax = "proto3";
+
+package movra.common;
+
+option go_package = "github.com/movra/proto/common";
+option java_package = "com.movra.proto.common";
+option java_multiple_files = true;
+option csharp_namespace = "Movra.Proto.Common";
+
+// Common metadata passed with all requests
+message RequestMetadata {
+  string correlation_id = 1;
+  string user_id = 2;
+  string kyc_level = 3;
+}
+
+// Standard error response
+message Error {
+  string code = 1;
+  string message = 2;
+  map<string, string> details = 3;
+}
+
+// Money representation
+message Money {
+  string currency = 1;  // ISO 4217 currency code (e.g., "SGD", "PHP")
+  string amount = 2;    // Decimal string to avoid floating point issues
+}
+
+// Pagination request
+message PaginationRequest {
+  int32 page = 1;
+  int32 page_size = 2;
+}
+
+// Pagination response
+message PaginationResponse {
+  int32 page = 1;
+  int32 page_size = 2;
+  int32 total_pages = 3;
+  int64 total_items = 4;
+}
+
+// Timestamp wrapper
+message Timestamp {
+  int64 seconds = 1;
+  int32 nanos = 2;
+}

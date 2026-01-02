@@ -1,0 +1,302 @@
+syntax = "proto3";
+
+package movra.payment;
+
+option go_package = "github.com/movra/proto/payment";
+option java_package = "com.movra.proto.payment";
+option java_multiple_files = true;
+option csharp_namespace = "Movra.Proto.Payment";
+
+import "common.proto";
+
+// Payment Service - handles transfer creation and management
+service PaymentService {
+  // Transfer operations
+  rpc CreateTransfer(CreateTransferRequest) returns (CreateTransferResponse);
+  rpc GetTransfer(GetTransferRequest) returns (GetTransferResponse);
+  rpc ConfirmTransfer(ConfirmTransferRequest) returns (ConfirmTransferResponse);
+  rpc CancelTransfer(CancelTransferRequest) returns (CancelTransferResponse);
+  rpc ListTransfers(ListTransfersRequest) returns (ListTransfersResponse);
+
+  // Quote (preview without creating)
+  rpc GetQuote(GetQuoteRequest) returns (GetQuoteResponse);
+
+  // Recipient management
+  rpc CreateRecipient(CreateRecipientRequest) returns (CreateRecipientResponse);
+  rpc GetRecipient(GetRecipientRequest) returns (GetRecipientResponse);
+  rpc ListRecipients(ListRecipientsRequest) returns (ListRecipientsResponse);
+  rpc DeleteRecipient(DeleteRecipientRequest) returns (DeleteRecipientResponse);
+
+  // Internal: Update transfer status (called by Settlement service via Kafka, but also available via gRPC)
+  rpc UpdateTransferStatus(UpdateTransferStatusRequest) returns (UpdateTransferStatusResponse);
+}
+
+// Transfer status
+enum TransferStatus {
+  TRANSFER_STATUS_UNSPECIFIED = 0;
+  TRANSFER_STATUS_CREATED = 1;
+  TRANSFER_STATUS_AWAITING_FUNDS = 2;
+  TRANSFER_STATUS_FUNDS_RECEIVED = 3;
+  TRANSFER_STATUS_CONVERTING = 4;
+  TRANSFER_STATUS_CONVERTED = 5;
+  TRANSFER_STATUS_PAYOUT_PENDING = 6;
+  TRANSFER_STATUS_PAYOUT_PROCESSING = 7;
+  TRANSFER_STATUS_COMPLETED = 8;
+  TRANSFER_STATUS_FAILED = 9;
+  TRANSFER_STATUS_REFUNDED = 10;
+  TRANSFER_STATUS_CANCELLED = 11;
+}
+
+// Funding method
+enum FundingMethod {
+  FUNDING_METHOD_UNSPECIFIED = 0;
+  FUNDING_METHOD_BANK_TRANSFER = 1;
+  FUNDING_METHOD_CARD = 2;
+  FUNDING_METHOD_WALLET = 3;
+}
+
+// Payout method
+enum PayoutMethod {
+  PAYOUT_METHOD_UNSPECIFIED = 0;
+  PAYOUT_METHOD_BANK_ACCOUNT = 1;
+  PAYOUT_METHOD_MOBILE_WALLET = 2;
+  PAYOUT_METHOD_CASH_PICKUP = 3;
+}
+
+// Transfer representation
+message Transfer {
+  string id = 1;
+  string user_id = 2;
+  string idempotency_key = 3;
+  TransferStatus status = 4;
+
+  // Amounts
+  movra.common.Money source_amount = 5;
+  movra.common.Money target_amount = 6;
+  movra.common.Money fee = 7;
+
+  // Rate info
+  string exchange_rate = 8;
+  string rate_lock_id = 9;
+  movra.common.Timestamp rate_expires_at = 10;
+
+  // Methods
+  FundingMethod funding_method = 11;
+  PayoutMethod payout_method = 12;
+
+  // Recipient
+  string recipient_id = 13;
+  Recipient recipient = 14;
+
+  // Funding details (for bank transfer)
+  FundingDetails funding_details = 15;
+
+  // Timestamps
+  movra.common.Timestamp created_at = 16;
+  movra.common.Timestamp updated_at = 17;
+  movra.common.Timestamp completed_at = 18;
+
+  // Status history
+  repeated TransferStatusChange status_history = 19;
+}
+
+// Transfer status change record
+message TransferStatusChange {
+  TransferStatus from_status = 1;
+  TransferStatus to_status = 2;
+  string reason = 3;
+  movra.common.Timestamp changed_at = 4;
+}
+
+// Funding details for bank transfer
+message FundingDetails {
+  string bank_name = 1;
+  string account_number = 2;
+  string account_name = 3;
+  string reference = 4;  // Unique reference for matching incoming payment
+}
+
+// Recipient representation
+message Recipient {
+  string id = 1;
+  string user_id = 2;
+  string nickname = 3;
+  PayoutMethod type = 4;
+  string country = 5;
+  string currency = 6;
+
+  // Type-specific details
+  oneof details {
+    BankAccountDetails bank_account = 7;
+    MobileWalletDetails mobile_wallet = 8;
+    CashPickupDetails cash_pickup = 9;
+  }
+
+  movra.common.Timestamp created_at = 10;
+}
+
+message BankAccountDetails {
+  string bank_name = 1;
+  string bank_code = 2;
+  string account_number = 3;
+  string account_name = 4;
+}
+
+message MobileWalletDetails {
+  string provider = 1;  // e.g., "gcash", "gopay"
+  string mobile_number = 2;
+  string account_name = 3;
+}
+
+message CashPickupDetails {
+  string first_name = 1;
+  string last_name = 2;
+  string country = 3;
+}
+
+// Create Transfer
+message CreateTransferRequest {
+  movra.common.RequestMetadata metadata = 1;
+  string idempotency_key = 2;
+  movra.common.Money source_amount = 3;
+  string target_currency = 4;
+  FundingMethod funding_method = 5;
+  string recipient_id = 6;
+  string rate_lock_id = 7;  // Optional: use a previously locked rate
+}
+
+message CreateTransferResponse {
+  Transfer transfer = 1;
+  movra.common.Error error = 2;
+}
+
+// Get Transfer
+message GetTransferRequest {
+  movra.common.RequestMetadata metadata = 1;
+  string transfer_id = 2;
+}
+
+message GetTransferResponse {
+  Transfer transfer = 1;
+  movra.common.Error error = 2;
+}
+
+// Confirm Transfer
+message ConfirmTransferRequest {
+  movra.common.RequestMetadata metadata = 1;
+  string transfer_id = 2;
+}
+
+message ConfirmTransferResponse {
+  Transfer transfer = 1;
+  movra.common.Error error = 2;
+}
+
+// Cancel Transfer
+message CancelTransferRequest {
+  movra.common.RequestMetadata metadata = 1;
+  string transfer_id = 2;
+  string reason = 3;
+}
+
+message CancelTransferResponse {
+  Transfer transfer = 1;
+  movra.common.Error error = 2;
+}
+
+// List Transfers
+message ListTransfersRequest {
+  movra.common.RequestMetadata metadata = 1;
+  movra.common.PaginationRequest pagination = 2;
+  TransferStatus status_filter = 3;
+}
+
+message ListTransfersResponse {
+  repeated Transfer transfers = 1;
+  movra.common.PaginationResponse pagination = 2;
+  movra.common.Error error = 3;
+}
+
+// Get Quote
+message GetQuoteRequest {
+  movra.common.RequestMetadata metadata = 1;
+  movra.common.Money source_amount = 2;
+  string target_currency = 3;
+  FundingMethod funding_method = 4;
+  PayoutMethod payout_method = 5;
+}
+
+message GetQuoteResponse {
+  movra.common.Money source_amount = 1;
+  movra.common.Money target_amount = 2;
+  movra.common.Money fee = 3;
+  string exchange_rate = 4;
+  movra.common.Timestamp rate_expires_at = 5;
+  movra.common.Error error = 6;
+}
+
+// Create Recipient
+message CreateRecipientRequest {
+  movra.common.RequestMetadata metadata = 1;
+  string nickname = 2;
+  PayoutMethod type = 3;
+  string country = 4;
+  string currency = 5;
+
+  oneof details {
+    BankAccountDetails bank_account = 6;
+    MobileWalletDetails mobile_wallet = 7;
+    CashPickupDetails cash_pickup = 8;
+  }
+}
+
+message CreateRecipientResponse {
+  Recipient recipient = 1;
+  movra.common.Error error = 2;
+}
+
+// Get Recipient
+message GetRecipientRequest {
+  movra.common.RequestMetadata metadata = 1;
+  string recipient_id = 2;
+}
+
+message GetRecipientResponse {
+  Recipient recipient = 1;
+  movra.common.Error error = 2;
+}
+
+// List Recipients
+message ListRecipientsRequest {
+  movra.common.RequestMetadata metadata = 1;
+  movra.common.PaginationRequest pagination = 2;
+}
+
+message ListRecipientsResponse {
+  repeated Recipient recipients = 1;
+  movra.common.PaginationResponse pagination = 2;
+  movra.common.Error error = 3;
+}
+
+// Delete Recipient
+message DeleteRecipientRequest {
+  movra.common.RequestMetadata metadata = 1;
+  string recipient_id = 2;
+}
+
+message DeleteRecipientResponse {
+  bool success = 1;
+  movra.common.Error error = 2;
+}
+
+// Update Transfer Status (internal)
+message UpdateTransferStatusRequest {
+  string transfer_id = 1;
+  TransferStatus new_status = 2;
+  string reason = 3;
+}
+
+message UpdateTransferStatusResponse {
+  Transfer transfer = 1;
+  movra.common.Error error = 2;
+}

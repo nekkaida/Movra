@@ -1,0 +1,150 @@
+syntax = "proto3";
+
+package movra.notification;
+
+option go_package = "github.com/movra/proto/notification";
+option java_package = "com.movra.proto.notification";
+option java_multiple_files = true;
+option csharp_namespace = "Movra.Proto.Notification";
+
+import "common.proto";
+
+// Notification Service - handles email, SMS, and push notifications
+service NotificationService {
+  // Send notification (typically triggered via Kafka, but available via gRPC)
+  rpc SendNotification(SendNotificationRequest) returns (SendNotificationResponse);
+
+  // Get notification status
+  rpc GetNotification(GetNotificationRequest) returns (GetNotificationResponse);
+
+  // List notifications for a user
+  rpc ListNotifications(ListNotificationsRequest) returns (ListNotificationsResponse);
+
+  // Resend failed notification
+  rpc ResendNotification(ResendNotificationRequest) returns (ResendNotificationResponse);
+}
+
+// Notification channel
+enum NotificationChannel {
+  NOTIFICATION_CHANNEL_UNSPECIFIED = 0;
+  NOTIFICATION_CHANNEL_EMAIL = 1;
+  NOTIFICATION_CHANNEL_SMS = 2;
+  NOTIFICATION_CHANNEL_PUSH = 3;
+  NOTIFICATION_CHANNEL_WEBHOOK = 4;
+}
+
+// Notification type (template)
+enum NotificationType {
+  NOTIFICATION_TYPE_UNSPECIFIED = 0;
+
+  // Transfer lifecycle
+  NOTIFICATION_TYPE_TRANSFER_CREATED = 1;
+  NOTIFICATION_TYPE_TRANSFER_AWAITING_FUNDS = 2;
+  NOTIFICATION_TYPE_TRANSFER_FUNDS_RECEIVED = 3;
+  NOTIFICATION_TYPE_TRANSFER_PROCESSING = 4;
+  NOTIFICATION_TYPE_TRANSFER_COMPLETED = 5;
+  NOTIFICATION_TYPE_TRANSFER_FAILED = 6;
+  NOTIFICATION_TYPE_TRANSFER_REFUNDED = 7;
+
+  // Cash pickup
+  NOTIFICATION_TYPE_PICKUP_CODE_READY = 8;
+  NOTIFICATION_TYPE_PICKUP_REMINDER = 9;
+  NOTIFICATION_TYPE_PICKUP_COLLECTED = 10;
+
+  // Account
+  NOTIFICATION_TYPE_WELCOME = 11;
+  NOTIFICATION_TYPE_KYC_APPROVED = 12;
+  NOTIFICATION_TYPE_KYC_REJECTED = 13;
+  NOTIFICATION_TYPE_PASSWORD_RESET = 14;
+  NOTIFICATION_TYPE_LOGIN_ALERT = 15;
+
+  // Marketing (optional)
+  NOTIFICATION_TYPE_RATE_ALERT = 16;
+}
+
+// Delivery status
+enum DeliveryStatus {
+  DELIVERY_STATUS_UNSPECIFIED = 0;
+  DELIVERY_STATUS_PENDING = 1;
+  DELIVERY_STATUS_SENT = 2;
+  DELIVERY_STATUS_DELIVERED = 3;
+  DELIVERY_STATUS_FAILED = 4;
+  DELIVERY_STATUS_BOUNCED = 5;
+}
+
+// Notification representation
+message Notification {
+  string id = 1;
+  string user_id = 2;
+  NotificationChannel channel = 3;
+  NotificationType type = 4;
+  DeliveryStatus status = 5;
+
+  // Content
+  string recipient = 6;  // Email address, phone number, device token
+  string subject = 7;    // For email
+  string body = 8;
+
+  // Metadata
+  map<string, string> template_data = 9;  // Data for template rendering
+  string correlation_id = 10;              // Link to transfer or event
+
+  // Delivery info
+  string provider_message_id = 11;
+  string failure_reason = 12;
+  int32 retry_count = 13;
+
+  // Timestamps
+  movra.common.Timestamp created_at = 14;
+  movra.common.Timestamp sent_at = 15;
+  movra.common.Timestamp delivered_at = 16;
+}
+
+// Send Notification
+message SendNotificationRequest {
+  string user_id = 1;
+  NotificationChannel channel = 2;
+  NotificationType type = 3;
+  string recipient = 4;  // Optional: override user's default
+  map<string, string> template_data = 5;
+  string correlation_id = 6;
+}
+
+message SendNotificationResponse {
+  Notification notification = 1;
+  movra.common.Error error = 2;
+}
+
+// Get Notification
+message GetNotificationRequest {
+  string notification_id = 1;
+}
+
+message GetNotificationResponse {
+  Notification notification = 1;
+  movra.common.Error error = 2;
+}
+
+// List Notifications
+message ListNotificationsRequest {
+  string user_id = 1;
+  movra.common.PaginationRequest pagination = 2;
+  NotificationChannel channel_filter = 3;
+  NotificationType type_filter = 4;
+}
+
+message ListNotificationsResponse {
+  repeated Notification notifications = 1;
+  movra.common.PaginationResponse pagination = 2;
+  movra.common.Error error = 3;
+}
+
+// Resend Notification
+message ResendNotificationRequest {
+  string notification_id = 1;
+}
+
+message ResendNotificationResponse {
+  Notification notification = 1;
+  movra.common.Error error = 2;
+}

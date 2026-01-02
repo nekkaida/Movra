@@ -1,0 +1,185 @@
+syntax = "proto3";
+
+package movra.settlement;
+
+option go_package = "github.com/movra/proto/settlement";
+option java_package = "com.movra.proto.settlement";
+option java_multiple_files = true;
+option csharp_namespace = "Movra.Proto.Settlement";
+
+import "common.proto";
+
+// Settlement Service - handles payout execution
+service SettlementService {
+  // Initiate payout (typically triggered via Kafka, but available via gRPC)
+  rpc InitiatePayout(InitiatePayoutRequest) returns (InitiatePayoutResponse);
+
+  // Get payout status
+  rpc GetPayout(GetPayoutRequest) returns (GetPayoutResponse);
+
+  // List payouts (admin)
+  rpc ListPayouts(ListPayoutsRequest) returns (ListPayoutsResponse);
+
+  // Retry failed payout (admin)
+  rpc RetryPayout(RetryPayoutRequest) returns (RetryPayoutResponse);
+
+  // Cancel payout (before processing)
+  rpc CancelPayout(CancelPayoutRequest) returns (CancelPayoutResponse);
+
+  // Get cash pickup code
+  rpc GetPickupCode(GetPickupCodeRequest) returns (GetPickupCodeResponse);
+}
+
+// Payout status
+enum PayoutStatus {
+  PAYOUT_STATUS_UNSPECIFIED = 0;
+  PAYOUT_STATUS_PENDING = 1;
+  PAYOUT_STATUS_PROCESSING = 2;
+  PAYOUT_STATUS_COMPLETED = 3;
+  PAYOUT_STATUS_FAILED = 4;
+  PAYOUT_STATUS_CANCELLED = 5;
+  PAYOUT_STATUS_READY_FOR_PICKUP = 6;  // For cash pickup
+  PAYOUT_STATUS_PICKED_UP = 7;          // Cash collected
+}
+
+// Payout method (mirrors payment.proto but for settlement context)
+enum PayoutMethod {
+  PAYOUT_METHOD_UNSPECIFIED = 0;
+  PAYOUT_METHOD_BANK_ACCOUNT = 1;
+  PAYOUT_METHOD_MOBILE_WALLET = 2;
+  PAYOUT_METHOD_CASH_PICKUP = 3;
+}
+
+// Payout representation
+message Payout {
+  string id = 1;
+  string transfer_id = 2;
+  PayoutStatus status = 3;
+  PayoutMethod method = 4;
+
+  movra.common.Money amount = 5;
+  string currency = 6;
+
+  // Recipient details
+  RecipientDetails recipient = 7;
+
+  // Processing info
+  string provider_reference = 8;  // Reference from payout provider
+  string batch_id = 9;            // If part of a batch
+
+  // For cash pickup
+  string pickup_code = 10;
+  movra.common.Timestamp pickup_expires_at = 11;
+
+  // Failure info
+  string failure_reason = 12;
+  int32 retry_count = 13;
+
+  // Timestamps
+  movra.common.Timestamp created_at = 14;
+  movra.common.Timestamp updated_at = 15;
+  movra.common.Timestamp completed_at = 16;
+}
+
+// Recipient details for payout
+message RecipientDetails {
+  PayoutMethod type = 1;
+
+  // Bank account
+  string bank_name = 2;
+  string bank_code = 3;
+  string account_number = 4;
+  string account_name = 5;
+
+  // Mobile wallet
+  string wallet_provider = 6;
+  string mobile_number = 7;
+
+  // Cash pickup
+  string first_name = 8;
+  string last_name = 9;
+  string country = 10;
+}
+
+// Batch for batch processing
+message PayoutBatch {
+  string id = 1;
+  PayoutMethod method = 2;
+  string currency = 3;
+  int32 total_payouts = 4;
+  int32 completed_payouts = 5;
+  int32 failed_payouts = 6;
+  movra.common.Money total_amount = 7;
+  movra.common.Timestamp created_at = 8;
+  movra.common.Timestamp completed_at = 9;
+}
+
+// Initiate Payout
+message InitiatePayoutRequest {
+  string transfer_id = 1;
+  movra.common.Money amount = 2;
+  PayoutMethod method = 3;
+  RecipientDetails recipient = 4;
+}
+
+message InitiatePayoutResponse {
+  Payout payout = 1;
+  movra.common.Error error = 2;
+}
+
+// Get Payout
+message GetPayoutRequest {
+  string payout_id = 1;
+}
+
+message GetPayoutResponse {
+  Payout payout = 1;
+  movra.common.Error error = 2;
+}
+
+// List Payouts
+message ListPayoutsRequest {
+  movra.common.PaginationRequest pagination = 1;
+  PayoutStatus status_filter = 2;
+  PayoutMethod method_filter = 3;
+  string batch_id = 4;
+}
+
+message ListPayoutsResponse {
+  repeated Payout payouts = 1;
+  movra.common.PaginationResponse pagination = 2;
+  movra.common.Error error = 3;
+}
+
+// Retry Payout
+message RetryPayoutRequest {
+  string payout_id = 1;
+}
+
+message RetryPayoutResponse {
+  Payout payout = 1;
+  movra.common.Error error = 2;
+}
+
+// Cancel Payout
+message CancelPayoutRequest {
+  string payout_id = 1;
+  string reason = 2;
+}
+
+message CancelPayoutResponse {
+  Payout payout = 1;
+  movra.common.Error error = 2;
+}
+
+// Get Pickup Code
+message GetPickupCodeRequest {
+  string payout_id = 1;
+}
+
+message GetPickupCodeResponse {
+  string pickup_code = 1;
+  movra.common.Timestamp expires_at = 2;
+  string pickup_location_info = 3;
+  movra.common.Error error = 4;
+}
