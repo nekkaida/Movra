@@ -7,6 +7,7 @@ using Prometheus;
 using AuthService.Data;
 using AuthService.Services;
 using AuthService.Grpc;
+using AuthService.Middleware;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -71,6 +72,7 @@ if (app.Environment.IsDevelopment())
 }
 
 // Middleware
+app.UseGlobalExceptionHandler();
 app.UseSerilogRequestLogging();
 app.UseRouting();
 
