@@ -1,7 +1,7 @@
 import { Request, Response, NextFunction } from 'express';
-import jwt from 'jsonwebtoken';
 import { config } from '../config';
 import { logger } from '../utils/logger';
+import * as authClient from '../grpc/authClient';
 
 export interface AuthenticatedRequest extends Request {
   user?: {
@@ -27,19 +27,50 @@ export const authMiddleware = async (
 
     const token = authHeader.split(' ')[1];
 
-    // In production, this would call the Auth service via gRPC to verify the token
-    // For now, we verify locally
-    const decoded = jwt.verify(token, config.jwt.secret) as {
-      userId: string;
-      email: string;
-      kycLevel: string;
+    // Call Auth service to verify token
+    const response = await authClient.verifyToken(token);
+
+    if (!response.valid || response.error) {
+      res.status(401).json({ error: response.error?.message || 'Invalid or expired token' });
+      return;
+    }
+
+    // Get full user info
+    const userResponse = await authClient.getUser(response.userId);
+
+    if (userResponse.error) {
+      res.status(401).json({ error: 'User not found' });
+      return;
+    }
+
+    req.user = {
+      userId: response.userId,
+      email: userResponse.user.email,
+      kycLevel: response.kycLevel,
     };
 
-    req.user = decoded;
     next();
   } catch (error) {
     logger.error({ error }, 'Authentication failed');
-    res.status(401).json({ error: 'Invalid or expired token' });
+    // Fall back to local JWT verification if Auth service unavailable
+    try {
+      const jwt = await import('jsonwebtoken');
+      const authHeader = req.headers.authorization;
+      if (authHeader) {
+        const token = authHeader.split(' ')[1];
+        const decoded = jwt.verify(token, config.jwt.secret) as {
+          userId: string;
+          email: string;
+          kycLevel: string;
+        };
+        req.user = decoded;
+        next();
+        return;
+      }
+    } catch {
+      // JWT fallback also failed
+    }
+    res.status(503).json({ error: 'Authentication service unavailable' });
   }
 };
 
@@ -53,17 +84,23 @@ export const optionalAuthMiddleware = async (
 
     if (authHeader && authHeader.startsWith('Bearer ')) {
       const token = authHeader.split(' ')[1];
-      const decoded = jwt.verify(token, config.jwt.secret) as {
-        userId: string;
-        email: string;
-        kycLevel: string;
-      };
-      req.user = decoded;
+
+      try {
+        const response = await authClient.verifyToken(token);
+        if (response.valid && !response.error) {
+          req.user = {
+            userId: response.userId,
+            email: '',
+            kycLevel: response.kycLevel,
+          };
+        }
+      } catch {
+        // Token invalid or service down, continue without auth
+      }
     }
 
     next();
   } catch (error) {
-    // Token invalid, but that's okay for optional auth
     next();
   }
 };
