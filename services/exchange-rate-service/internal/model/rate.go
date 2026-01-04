@@ -8,9 +8,14 @@ import (
 type ExchangeRate struct {
 	SourceCurrency   string    `json:"sourceCurrency"`
 	TargetCurrency   string    `json:"targetCurrency"`
-	Rate             string    `json:"rate"`             // Mid-market rate
+	MidRate          float64   `json:"midRate"`          // Mid-market rate (raw)
+	Rate             string    `json:"rate"`             // Mid-market rate (string for API)
 	BuyRate          string    `json:"buyRate"`          // Rate we offer (includes margin)
+	BidRate          float64   `json:"bidRate"`          // Rate to buy target currency
+	AskRate          float64   `json:"askRate"`          // Rate to sell target currency
+	Spread           float64   `json:"spread"`           // Spread percentage
 	MarginPercentage string    `json:"marginPercentage"`
+	Source           string    `json:"source"`           // Provider name
 	FetchedAt        time.Time `json:"fetchedAt"`
 	ExpiresAt        time.Time `json:"expiresAt"`
 }
@@ -46,6 +51,20 @@ type RateLockRequest struct {
 	SourceCurrency  string `json:"sourceCurrency" binding:"required"`
 	TargetCurrency  string `json:"targetCurrency" binding:"required"`
 	DurationSeconds int    `json:"durationSeconds"`
+}
+
+// RateQuote represents a customer-facing rate quote with fees
+type RateQuote struct {
+	SourceCurrency   string    `json:"sourceCurrency"`
+	TargetCurrency   string    `json:"targetCurrency"`
+	SourceAmount     float64   `json:"sourceAmount"`     // Amount in source currency
+	TargetAmount     float64   `json:"targetAmount"`     // Amount in target currency after conversion
+	ExchangeRate     float64   `json:"exchangeRate"`     // Rate applied (includes margin)
+	MidMarketRate    float64   `json:"midMarketRate"`    // Transparent mid-market rate
+	Fee              float64   `json:"fee"`              // Fee in source currency
+	TotalCost        float64   `json:"totalCost"`        // SourceAmount + Fee
+	ValidUntil       time.Time `json:"validUntil"`       // When this quote expires
+	QuoteID          string    `json:"quoteId"`          // Unique identifier for this quote
 }
 
 // Corridors is a list of all supported corridors

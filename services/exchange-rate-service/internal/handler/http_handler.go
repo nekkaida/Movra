@@ -2,10 +2,11 @@ package handler
 
 import (
 	"net/http"
+	"strconv"
 
 	"github.com/gin-gonic/gin"
-	"github.com/movra/exchange-rate-service/internal/model"
-	"github.com/movra/exchange-rate-service/internal/service"
+	"github.com/patteeraL/movra/services/exchange-rate-service/internal/model"
+	"github.com/patteeraL/movra/services/exchange-rate-service/internal/service"
 	"go.uber.org/zap"
 )
 
@@ -29,9 +30,6 @@ func (h *HTTPHandler) SetupRoutes(r *gin.Engine) {
 	r.GET("/health", h.Health)
 	r.GET("/ready", h.Ready)
 
-	// Metrics
-	r.GET("/metrics", h.Metrics)
-
 	// Rate endpoints
 	api := r.Group("/api")
 	{
@@ -42,6 +40,7 @@ func (h *HTTPHandler) SetupRoutes(r *gin.Engine) {
 			rates.GET("/locked/:lockId", h.GetLockedRate)
 		}
 		api.GET("/corridors", h.GetCorridors)
+		api.GET("/quote", h.GetQuote)
 	}
 }
 
@@ -55,16 +54,20 @@ func (h *HTTPHandler) Health(c *gin.Context) {
 
 // Ready returns the readiness status
 func (h *HTTPHandler) Ready(c *gin.Context) {
+	// Check if service dependencies are healthy
+	if err := h.rateService.Health(c.Request.Context()); err != nil {
+		c.JSON(http.StatusServiceUnavailable, gin.H{
+			"status":  "not ready",
+			"service": "exchange-rate-service",
+			"error":   err.Error(),
+		})
+		return
+	}
+
 	c.JSON(http.StatusOK, gin.H{
 		"status":  "ready",
 		"service": "exchange-rate-service",
 	})
-}
-
-// Metrics returns Prometheus metrics (placeholder)
-func (h *HTTPHandler) Metrics(c *gin.Context) {
-	// In production, use promhttp.Handler()
-	c.String(http.StatusOK, "# Prometheus metrics endpoint")
 }
 
 // GetRate retrieves the current exchange rate
@@ -129,4 +132,43 @@ func (h *HTTPHandler) GetCorridors(c *gin.Context) {
 	sourceCurrency := c.Query("source")
 	corridors := h.rateService.GetCorridors(sourceCurrency)
 	c.JSON(http.StatusOK, gin.H{"corridors": corridors})
+}
+
+// GetQuote generates a rate quote with fees
+func (h *HTTPHandler) GetQuote(c *gin.Context) {
+	from := c.Query("from")
+	to := c.Query("to")
+	amountStr := c.Query("amount")
+
+	if from == "" || to == "" || amountStr == "" {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"error": "from, to, and amount query parameters are required",
+		})
+		return
+	}
+
+	if len(from) != 3 || len(to) != 3 {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid currency code format"})
+		return
+	}
+
+	amount, err := strconv.ParseFloat(amountStr, 64)
+	if err != nil || amount <= 0 {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid amount"})
+		return
+	}
+
+	quote, err := h.rateService.GetQuote(c.Request.Context(), from, to, amount)
+	if err != nil {
+		h.logger.Error("Failed to get quote",
+			zap.String("from", from),
+			zap.String("to", to),
+			zap.Float64("amount", amount),
+			zap.Error(err),
+		)
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	c.JSON(http.StatusOK, quote)
 }
