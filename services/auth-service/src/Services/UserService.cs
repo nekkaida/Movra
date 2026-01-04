@@ -1,6 +1,7 @@
 using Microsoft.EntityFrameworkCore;
 using AuthService.Data;
 using AuthService.Models;
+using AuthService.Exceptions;
 using BCrypt.Net;
 
 namespace AuthService.Services;
@@ -41,7 +42,7 @@ public class UserService : IUserService
         var existingUser = await GetByEmailAsync(email);
         if (existingUser != null)
         {
-            throw new InvalidOperationException("User with this email already exists");
+            throw new UserAlreadyExistsException(email);
         }
 
         var user = new User
@@ -72,7 +73,7 @@ public class UserService : IUserService
         var user = await GetByIdAsync(userId);
         if (user == null)
         {
-            throw new InvalidOperationException("User not found");
+            throw new UserNotFoundException(userId.ToString());
         }
 
         user.KycLevel = level;
