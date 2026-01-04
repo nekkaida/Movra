@@ -1,5 +1,6 @@
 package com.movra.payment.service;
 
+import com.movra.payment.dto.QuoteResponse;
 import com.movra.payment.kafka.TransferEventPublisher;
 import com.movra.payment.model.*;
 import com.movra.payment.repository.TransferRepository;
@@ -160,6 +161,26 @@ public class TransferService {
         log.info("Transfer {} status updated: {} -> {}", transferId, transfer.getStatus(), newStatus);
 
         return transfer;
+    }
+
+    public QuoteResponse getQuote(String sourceCurrency, BigDecimal sourceAmount,
+                                  String targetCurrency, FundingMethod fundingMethod) {
+        // Get rate (mock for now, will integrate with Exchange Rate Service later)
+        BigDecimal exchangeRate = getMockRate(sourceCurrency, targetCurrency);
+        BigDecimal fee = calculateFee(sourceAmount, fundingMethod);
+        BigDecimal netAmount = sourceAmount.subtract(fee);
+        BigDecimal targetAmount = netAmount.multiply(exchangeRate).setScale(2, RoundingMode.HALF_UP);
+
+        return QuoteResponse.builder()
+                .sourceCurrency(sourceCurrency)
+                .sourceAmount(sourceAmount)
+                .targetCurrency(targetCurrency)
+                .targetAmount(targetAmount)
+                .exchangeRate(exchangeRate)
+                .fee(fee)
+                .totalCost(sourceAmount)
+                .validUntil(Instant.now().plusSeconds(30))
+                .build();
     }
 
     private BigDecimal getMockRate(String from, String to) {
