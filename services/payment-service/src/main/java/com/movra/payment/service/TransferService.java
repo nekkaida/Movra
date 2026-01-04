@@ -1,6 +1,8 @@
 package com.movra.payment.service;
 
 import com.movra.payment.dto.QuoteResponse;
+import com.movra.payment.exception.RateLockExpiredException;
+import com.movra.payment.grpc.ExchangeRateClient;
 import com.movra.payment.kafka.TransferEventPublisher;
 import com.movra.payment.model.*;
 import com.movra.payment.repository.TransferRepository;
@@ -23,6 +25,8 @@ public class TransferService {
 
     private final TransferRepository transferRepository;
     private final TransferEventPublisher eventPublisher;
+    private final RecipientService recipientService;
+    private final ExchangeRateClient exchangeRateClient;
 
     @Transactional
     public Transfer createTransfer(
@@ -43,12 +47,24 @@ public class TransferService {
             return existing.get();
         }
 
-        // TODO: Get locked rate from Exchange Rate service via gRPC
-        // For now, use mock rate
-        BigDecimal exchangeRate = getMockRate(sourceCurrency, targetCurrency);
+        // Validate recipient exists and belongs to user
+        var recipient = recipientService.getRecipient(recipientId, userId);
+        PayoutMethod actualPayoutMethod = payoutMethod != null ? payoutMethod : recipient.getType();
+
+        // Get rate from Exchange Rate Service
+        ExchangeRateClient.RateInfo rateInfo;
+        if (rateLockId != null) {
+            rateInfo = exchangeRateClient.getLockedRate(rateLockId)
+                    .orElseThrow(() -> new RateLockExpiredException(rateLockId));
+        } else {
+            rateInfo = exchangeRateClient.lockRate(sourceCurrency, targetCurrency, 30)
+                    .orElseThrow(() -> new IllegalArgumentException(
+                            "Unsupported currency pair: " + sourceCurrency + "/" + targetCurrency));
+        }
+
         BigDecimal fee = calculateFee(sourceAmount, fundingMethod);
         BigDecimal netAmount = sourceAmount.subtract(fee);
-        BigDecimal targetAmount = netAmount.multiply(exchangeRate).setScale(2, RoundingMode.HALF_UP);
+        BigDecimal targetAmount = netAmount.multiply(rateInfo.buyRate()).setScale(2, RoundingMode.HALF_UP);
 
         var transfer = Transfer.builder()
                 .userId(userId)
@@ -58,13 +74,13 @@ public class TransferService {
                 .sourceAmount(sourceAmount)
                 .targetCurrency(targetCurrency)
                 .targetAmount(targetAmount)
-                .exchangeRate(exchangeRate)
-                .rateLockId(rateLockId)
-                .rateExpiresAt(Instant.now().plusSeconds(30))
+                .exchangeRate(rateInfo.buyRate())
+                .rateLockId(rateInfo.rateLockId())
+                .rateExpiresAt(rateInfo.expiresAt())
                 .feeAmount(fee)
                 .feeCurrency(sourceCurrency)
                 .fundingMethod(fundingMethod)
-                .payoutMethod(payoutMethod)
+                .payoutMethod(actualPayoutMethod)
                 .recipientId(recipientId)
                 .build();
 
