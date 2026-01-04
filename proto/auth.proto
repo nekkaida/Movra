@@ -5,7 +5,7 @@ package movra.auth;
 option go_package = "github.com/movra/proto/auth";
 option java_package = "com.movra.proto.auth";
 option java_multiple_files = true;
-option csharp_namespace = "Movra.Proto.Auth";
+option csharp_namespace = "Movra.Auth";
 
 import "common.proto";
 
