@@ -1,3 +1,5 @@
+using System;
+using System.Threading.Tasks;
 using AuthService.Controllers;
 using AuthService.Dtos;
 using AuthService.Exceptions;
