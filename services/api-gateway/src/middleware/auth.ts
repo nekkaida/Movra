@@ -9,7 +9,7 @@ export interface AuthenticatedRequest extends Request {
     email: string;
     kycLevel: string;
   };
-  correlationId: string;
+  correlationId?: string;
 }
 
 export const authMiddleware = async (

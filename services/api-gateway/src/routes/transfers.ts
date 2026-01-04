@@ -22,7 +22,7 @@ router.post('/', async (req: AuthenticatedRequest, res: Response) => {
     const metadata = paymentClient.buildMetadata(
       req.user!.userId,
       req.user!.kycLevel,
-      req.correlationId
+      req.correlationId || ''
     );
 
     const response = await paymentClient.createTransfer(
@@ -56,7 +56,7 @@ router.get('/:id', async (req: AuthenticatedRequest, res: Response) => {
     const metadata = paymentClient.buildMetadata(
       req.user!.userId,
       req.user!.kycLevel,
-      req.correlationId
+      req.correlationId || ''
     );
 
     const response = await paymentClient.getTransfer(metadata, id);
@@ -85,7 +85,7 @@ router.post('/:id/confirm', async (req: AuthenticatedRequest, res: Response) => 
     const metadata = paymentClient.buildMetadata(
       req.user!.userId,
       req.user!.kycLevel,
-      req.correlationId
+      req.correlationId || ''
     );
 
     const response = await paymentClient.confirmTransfer(metadata, id);
@@ -111,7 +111,7 @@ router.get('/', async (req: AuthenticatedRequest, res: Response) => {
     const metadata = paymentClient.buildMetadata(
       req.user!.userId,
       req.user!.kycLevel,
-      req.correlationId
+      req.correlationId || ''
     );
 
     const response = await paymentClient.listTransfers(
@@ -145,7 +145,7 @@ router.post('/:id/cancel', async (req: AuthenticatedRequest, res: Response) => {
     const metadata = paymentClient.buildMetadata(
       req.user!.userId,
       req.user!.kycLevel,
-      req.correlationId
+      req.correlationId || ''
     );
 
     const response = await paymentClient.cancelTransfer(metadata, id, reason || 'User cancelled');
