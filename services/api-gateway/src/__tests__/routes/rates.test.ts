@@ -1,6 +1,6 @@
-import { describe, it, expect, jest, beforeEach } from '@jest/globals';
+/* eslint-disable @typescript-eslint/no-explicit-any */
 
-// Mock the gRPC clients
+// Mock the gRPC clients before imports
 jest.mock('../../grpc/exchangeClient', () => ({
   getRate: jest.fn(),
   lockRate: jest.fn(),
@@ -31,7 +31,6 @@ describe('Rates Routes', () => {
 
       (exchangeClient.getRate as jest.Mock).mockResolvedValue(mockRate);
 
-      // Test would use supertest here with actual app
       const result = await exchangeClient.getRate('SGD', 'PHP');
 
       expect(result.rate.sourceCurrency).toBe('SGD');
