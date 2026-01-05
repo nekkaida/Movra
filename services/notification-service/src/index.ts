@@ -1,31 +1,47 @@
 import express from 'express';
 import pinoHttp from 'pino-http';
-import { Kafka } from 'kafkajs';
 import pino from 'pino';
-import { Registry, collectDefaultMetrics } from 'prom-client';
+import * as grpc from '@grpc/grpc-js';
+import { Registry, collectDefaultMetrics, Counter, Histogram } from 'prom-client';
+
+import { config } from './config';
+import { NotificationService } from './services/notificationService';
+import { createGrpcServer } from './grpc/server';
+import { KafkaNotificationConsumer } from './kafka/consumer';
+import { NotificationChannel } from './types';
 
 const logger = pino({
   level: process.env.NODE_ENV === 'production' ? 'info' : 'debug',
+  name: 'notification-service',
 });
-
-const config = {
-  port: parseInt(process.env.PORT || '3002', 10),
-  kafkaBrokers: (process.env.KAFKA_BROKERS || 'localhost:9092').split(','),
-  smtpHost: process.env.SMTP_HOST || 'localhost',
-  smtpPort: parseInt(process.env.SMTP_PORT || '1025', 10),
-};
 
 // Prometheus metrics
 const register = new Registry();
 collectDefaultMetrics({ register });
 
-// Kafka consumer
-const kafka = new Kafka({
-  clientId: 'notification-service',
-  brokers: config.kafkaBrokers,
+const notificationsSentTotal = new Counter({
+  name: 'notifications_sent_total',
+  help: 'Total notifications sent',
+  labelNames: ['channel', 'type', 'status'],
+  registers: [register],
 });
 
-const consumer = kafka.consumer({ groupId: 'notification-service-group' });
+const notificationDuration = new Histogram({
+  name: 'notification_send_duration_seconds',
+  help: 'Time to send notification',
+  labelNames: ['channel'],
+  buckets: [0.1, 0.5, 1, 2, 5],
+  registers: [register],
+});
+
+// Initialize notification service (providers are created internally)
+const notificationService = new NotificationService();
+
+// Initialize Kafka consumer
+const kafkaConsumer = new KafkaNotificationConsumer(notificationService);
+
+// Initialize gRPC server
+const grpcServer = createGrpcServer(notificationService);
 
 // Express app
 const app = express();
@@ -55,97 +71,122 @@ app.get('/metrics', async (_req, res) => {
 app.post('/api/notifications', async (req, res) => {
   const { userId, channel, type, recipient, templateData, correlationId } = req.body;
 
-  // TODO: Implement actual notification sending
-  const notification = {
-    id: `notif_${Date.now()}`,
-    userId,
-    channel,
-    type,
-    recipient,
-    status: 'SENT',
-    correlationId,
-    createdAt: new Date().toISOString(),
-  };
-
-  logger.info({ notification }, 'Notification sent');
-
-  res.status(201).json(notification);
-});
-
-app.get('/api/notifications/:id', (req, res) => {
-  const { id } = req.params;
-  res.json({
-    id,
-    status: 'DELIVERED',
-    deliveredAt: new Date().toISOString(),
-  });
-});
-
-// Kafka consumer setup
-async function startKafkaConsumer() {
+  const start = Date.now();
   try {
-    await consumer.connect();
-    await consumer.subscribe({
-      topics: [
-        'movra.transfers.initiated',
-        'movra.transfers.funds-received',
-        'movra.transfers.completed',
-        'movra.transfers.failed',
-        'movra.payouts.completed',
-        'movra.payouts.failed',
-      ],
-      fromBeginning: false,
+    const notification = await notificationService.sendNotification({
+      userId,
+      channel: channel as NotificationChannel,
+      type,
+      recipient,
+      templateData: templateData || {},
+      correlationId,
     });
 
-    await consumer.run({
-      eachMessage: async ({ topic, partition, message }) => {
-        const value = message.value?.toString();
-        if (!value) return;
+    notificationsSentTotal.inc({ channel, type, status: notification.status });
+    notificationDuration.observe({ channel }, (Date.now() - start) / 1000);
 
-        try {
-          const event = JSON.parse(value);
-          logger.info({ topic, event }, 'Received event');
+    logger.info({ notificationId: notification.id }, 'Notification sent via HTTP');
+    res.status(201).json(notification);
+  } catch (error) {
+    logger.error({ error }, 'Failed to send notification');
+    res.status(500).json({ error: 'Failed to send notification' });
+  }
+});
 
-          // TODO: Implement notification logic based on event type
-          // For now, just log
-          switch (topic) {
-            case 'movra.transfers.initiated':
-              logger.info({ transferId: event.transferId }, 'Would send transfer initiated notification');
-              break;
-            case 'movra.transfers.completed':
-              logger.info({ transferId: event.transferId }, 'Would send transfer completed notification');
-              break;
-            case 'movra.transfers.failed':
-              logger.info({ transferId: event.transferId }, 'Would send transfer failed notification');
-              break;
-            default:
-              logger.debug({ topic }, 'Unhandled topic');
-          }
-        } catch (error) {
-          logger.error({ error, topic, message: value }, 'Failed to process message');
-        }
-      },
-    });
+app.get('/api/notifications/:id', async (req, res) => {
+  const { id } = req.params;
+  const notification = await notificationService.getNotification(id);
 
+  if (!notification) {
+    res.status(404).json({ error: 'Notification not found' });
+    return;
+  }
+
+  res.json(notification);
+});
+
+app.get('/api/notifications', async (req, res) => {
+  const { userId, channel, limit, offset } = req.query;
+
+  if (!userId) {
+    res.status(400).json({ error: 'userId is required' });
+    return;
+  }
+
+  const notifications = await notificationService.listNotifications(userId as string, {
+    channel: channel as NotificationChannel | undefined,
+    limit: limit ? parseInt(limit as string, 10) : 20,
+    offset: offset ? parseInt(offset as string, 10) : 0,
+  });
+
+  res.json({ notifications, total: notifications.length });
+});
+
+app.post('/api/notifications/:id/resend', async (req, res) => {
+  const { id } = req.params;
+
+  try {
+    const notification = await notificationService.resendNotification(id);
+    if (!notification) {
+      res.status(404).json({ error: 'Notification not found' });
+      return;
+    }
+    res.json(notification);
+  } catch (error) {
+    logger.error({ error, notificationId: id }, 'Failed to resend notification');
+    res.status(500).json({ error: 'Failed to resend notification' });
+  }
+});
+
+// Start servers
+async function start() {
+  // Start HTTP server
+  app.listen(config.httpPort, () => {
+    logger.info({ port: config.httpPort }, 'HTTP server started');
+  });
+
+  // Start gRPC server
+  grpcServer.bindAsync(
+    `0.0.0.0:${config.grpcPort}`,
+    grpc.ServerCredentials.createInsecure(),
+    (error, port) => {
+      if (error) {
+        logger.error({ error }, 'Failed to start gRPC server');
+        return;
+      }
+      logger.info({ port }, 'gRPC server started');
+    }
+  );
+
+  // Start Kafka consumer
+  try {
+    await kafkaConsumer.start();
     logger.info('Kafka consumer started');
   } catch (error) {
     logger.error({ error }, 'Failed to start Kafka consumer');
   }
 }
 
-// Start server
-app.listen(config.port, () => {
-  logger.info({ port: config.port }, 'Notification Service started');
-});
-
-// Start Kafka consumer (don't await - let it run in background)
-startKafkaConsumer().catch((error) => {
-  logger.error({ error }, 'Kafka consumer error');
-});
-
 // Graceful shutdown
-process.on('SIGTERM', async () => {
-  logger.info('SIGTERM received, shutting down');
-  await consumer.disconnect();
-  process.exit(0);
+async function shutdown() {
+  logger.info('Shutting down...');
+
+  try {
+    await kafkaConsumer.stop();
+    grpcServer.forceShutdown();
+    logger.info('Shutdown complete');
+    process.exit(0);
+  } catch (error) {
+    logger.error({ error }, 'Error during shutdown');
+    process.exit(1);
+  }
+}
+
+process.on('SIGTERM', shutdown);
+process.on('SIGINT', shutdown);
+
+// Start the service
+start().catch((error) => {
+  logger.error({ error }, 'Failed to start service');
+  process.exit(1);
 });
