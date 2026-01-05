@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"fmt"
+	"net"
 	"net/http"
 	"os"
 	"os/signal"
@@ -10,7 +11,18 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
+	"github.com/movra/settlement-service/internal/config"
+	settlementgrpc "github.com/movra/settlement-service/internal/grpc"
+	"github.com/movra/settlement-service/internal/kafka"
+	"github.com/movra/settlement-service/internal/provider"
+	"github.com/movra/settlement-service/internal/repository"
+	"github.com/movra/settlement-service/internal/service"
+	"github.com/redis/go-redis/v9"
 	"go.uber.org/zap"
+	"google.golang.org/grpc"
+	"google.golang.org/grpc/health"
+	"google.golang.org/grpc/health/grpc_health_v1"
+	"google.golang.org/grpc/reflection"
 )
 
 func main() {
@@ -18,9 +30,40 @@ func main() {
 	logger, _ := zap.NewDevelopment()
 	defer logger.Sync()
 
-	port := getEnv("HTTP_PORT", "8083")
+	// Load config
+	cfg := config.Load()
 
-	// Setup Gin
+	// Setup Redis
+	redisClient := redis.NewClient(&redis.Options{
+		Addr:     cfg.RedisAddr,
+		Password: cfg.RedisPassword,
+		DB:       cfg.RedisDB,
+	})
+	defer redisClient.Close()
+
+	// Test Redis connection
+	ctx := context.Background()
+	if err := redisClient.Ping(ctx).Err(); err != nil {
+		logger.Warn("Redis not available, service will work without persistence", zap.Error(err))
+	}
+
+	// Create repository
+	repo := repository.NewRedisRepository(redisClient)
+
+	// Create provider
+	var payoutProvider provider.PayoutProvider
+	switch cfg.ProviderType {
+	case "simulated":
+		payoutProvider = provider.NewSimulatedProvider(cfg.ProviderFailureRate, cfg.ProviderProcessingTime)
+	default:
+		payoutProvider = provider.NewSimulatedProvider(10, 2*time.Second)
+	}
+
+	// Create service
+	payoutService := service.NewPayoutService(repo, payoutProvider, logger, cfg.MaxRetries)
+
+	// Setup Gin router for HTTP
+	gin.SetMode(gin.ReleaseMode)
 	router := gin.New()
 	router.Use(gin.Recovery())
 
@@ -39,33 +82,68 @@ func main() {
 		})
 	})
 
-	// API endpoints
-	api := router.Group("/api")
-	{
-		payouts := api.Group("/payouts")
-		{
-			payouts.POST("/", initiatePayoutHandler)
-			payouts.GET("/:id", getPayoutHandler)
-			payouts.POST("/:id/retry", retryPayoutHandler)
-			payouts.POST("/:id/cancel", cancelPayoutHandler)
-		}
-	}
-
 	// Create HTTP server
 	httpServer := &http.Server{
-		Addr:         fmt.Sprintf(":%s", port),
+		Addr:         fmt.Sprintf(":%s", cfg.HTTPPort),
 		Handler:      router,
 		ReadTimeout:  10 * time.Second,
 		WriteTimeout: 10 * time.Second,
 	}
 
+	// Create gRPC server
+	grpcServer := grpc.NewServer()
+	settlementServer := settlementgrpc.NewSettlementServer(payoutService, logger)
+	settlementgrpc.RegisterSettlementServiceServer(grpcServer, settlementServer)
+
+	// Register health check
+	healthServer := health.NewServer()
+	grpc_health_v1.RegisterHealthServer(grpcServer, healthServer)
+	healthServer.SetServingStatus("", grpc_health_v1.HealthCheckResponse_SERVING)
+
+	// Enable reflection for grpcurl
+	reflection.Register(grpcServer)
+
+	// Create Kafka consumer
+	kafkaConsumer := kafka.NewConsumer(
+		cfg.KafkaBrokers,
+		cfg.KafkaTopicFunded,
+		cfg.KafkaConsumerGroup,
+		payoutService,
+		logger,
+	)
+
 	// Start HTTP server
 	go func() {
-		logger.Info("Starting Settlement Service", zap.String("port", port))
+		logger.Info("Starting HTTP server", zap.String("port", cfg.HTTPPort))
 		if err := httpServer.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 			logger.Fatal("HTTP server failed", zap.Error(err))
 		}
 	}()
+
+	// Start gRPC server
+	go func() {
+		lis, err := net.Listen("tcp", fmt.Sprintf(":%s", cfg.GRPCPort))
+		if err != nil {
+			logger.Fatal("Failed to listen for gRPC", zap.Error(err))
+		}
+		logger.Info("Starting gRPC server", zap.String("port", cfg.GRPCPort))
+		if err := grpcServer.Serve(lis); err != nil {
+			logger.Fatal("gRPC server failed", zap.Error(err))
+		}
+	}()
+
+	// Start Kafka consumer
+	consumerCtx, cancelConsumer := context.WithCancel(context.Background())
+	go func() {
+		if err := kafkaConsumer.Start(consumerCtx); err != nil {
+			logger.Error("Kafka consumer error", zap.Error(err))
+		}
+	}()
+
+	logger.Info("Settlement Service started",
+		zap.String("httpPort", cfg.HTTPPort),
+		zap.String("grpcPort", cfg.GRPCPort),
+	)
 
 	// Wait for interrupt signal
 	quit := make(chan os.Signal, 1)
@@ -74,53 +152,18 @@ func main() {
 
 	logger.Info("Shutting down...")
 
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	// Graceful shutdown
+	cancelConsumer()
+	kafkaConsumer.Close()
+
+	shutdownCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
-	if err := httpServer.Shutdown(ctx); err != nil {
-		logger.Error("Shutdown error", zap.Error(err))
+	grpcServer.GracefulStop()
+
+	if err := httpServer.Shutdown(shutdownCtx); err != nil {
+		logger.Error("HTTP shutdown error", zap.Error(err))
 	}
 
-	logger.Info("Server stopped")
-}
-
-func initiatePayoutHandler(c *gin.Context) {
-	// TODO: Implement payout initiation
-	c.JSON(http.StatusCreated, gin.H{
-		"id":       "payout_" + fmt.Sprintf("%d", time.Now().UnixNano()),
-		"status":   "PENDING",
-		"message":  "Payout initiated",
-	})
-}
-
-func getPayoutHandler(c *gin.Context) {
-	id := c.Param("id")
-	c.JSON(http.StatusOK, gin.H{
-		"id":     id,
-		"status": "PROCESSING",
-	})
-}
-
-func retryPayoutHandler(c *gin.Context) {
-	id := c.Param("id")
-	c.JSON(http.StatusOK, gin.H{
-		"id":     id,
-		"status": "PENDING",
-		"retryCount": 1,
-	})
-}
-
-func cancelPayoutHandler(c *gin.Context) {
-	id := c.Param("id")
-	c.JSON(http.StatusOK, gin.H{
-		"id":     id,
-		"status": "CANCELLED",
-	})
-}
-
-func getEnv(key, defaultValue string) string {
-	if value := os.Getenv(key); value != "" {
-		return value
-	}
-	return defaultValue
+	logger.Info("Settlement Service stopped")
 }
